@@ -18,25 +18,25 @@ class q_learner:
         '''
         Creates an instance of the q learner
         '''
-        #random.seed(0)
+        
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
         self.moves_tracker = []
+        self.visited = {}
         self.__create_map__()
     
     def __create_map__(self):
         world = [0] * 50
         self.reward_indices = {
-            6: -10, 7: -10, 10: 1500, 13: 25, 14: -10, 
-            24: -100, 25: -10, 26: -10, 28: -10, 34: -100, 
-            38: -10, 42: -10, 44: -100, 48: -10}
+            6: -10, 7: -10, 10: -10, 13: 25, 14: -10,
+            24: -10000, 25: -10, 26: -10, 28: -10, 34: -10000, 
+            38: -10, 42: -10, 44: -10000, 47: 1500, 48: -10}
         
         mappings = {}
         for index in range(len(world)):
             position = index + 1
-            if (position) in self.reward_indices.keys():
-                world[index] = self.reward_indices[position]
+            self.visited[position] = 0
             if position > 10:
                 mappings[(position, 'N')] = 0
             if position % 10 != 1:
@@ -48,51 +48,59 @@ class q_learner:
         self.q_table = mappings
     
     def train(self, epochs = 100):
-        #cache the actual epsilon value
-        store_epsilon = self.epsilon
-        #set epsilon to zero for full random on first epoch
-        self.epsilon = 0
+        old_ep = self.epsilon
+        if epochs >= 100_000:
+            self.epsilon = 0.9
         for epoch in range(epochs):
             self.transition_function(31)
-            #after first set of transitions, set epsilon back to specfied params
-            self.epsilon = store_epsilon
-            #check if epoch is not the last epoch and reset moves tracker
-            if epoch < epochs - 1:
-                self.moves_tracker = []
+            if epoch % 1000 == 0:
+                if self.epsilon >= old_ep:
+                    self.epsilon -= 0.001
+                else:
+                    self.epsilon = old_ep
+                print(epoch + 1)
+                print(self.moves_tracker)
+            self.moves_tracker = []
+    
+    def final_run(self):
+        self.visited.fromkeys(self.visited, 0)
+        return self.transition_function(training_mode=False)
         
-        #display moves taken by the agent
-        print(self.moves_tracker)
-        
-    def transition_function(self, position = 31):
+    def transition_function(self, position = 31, training_mode = True):
         #add first position to moves tracker
         self.moves_tracker.append(position)
 
         #if the current reward of the position is 1500 (goal) or -100 (death) then end the learning
-        while self.__get_reward__(position) != 1500 and self.__get_reward__(position) != -100:
+        while True:
+            self.visited[position] += 1
             #get the next move based on the greedy policy
-            move = self.greedy_policy(position)
+            move = self.greedy_policy(position, training_mode)
+            # print(f'The move that will be made: {move}')
             #get next state from move
             next_state = self.get_next_state(move)
             #update the q table based on Belmont's formula
             self.q_table[move] = (1 - self.alpha) * self.q_table[move] + self.alpha * (self.__get_reward__(position) + self.gamma * self.argmax(next_state)) #get the max value of the direction
+
             #set the position to the next move
             position = next_state
+            
             #add the new position to the moves tracker
+            if self.__get_reward__(move[0]) == 1500 or self.__get_reward__(move[0]) == -10000:
+                break
             self.moves_tracker.append(position)
-    
-    def greedy_policy(self, position):
+            
+        return self.moves_tracker
 
-        #get the possible moves from the position
+    def greedy_policy(self, position, training_mode):
         possible_positions = self.__find_cardinal_directions__(position)
+        best_move = self.get_best_move(possible_positions)
 
-        #generate a random number to compare to epsilon
         random_number = random.random()
-        
-        if random_number > self.epsilon:
-            best_move = self.get_best_move(possible_positions)
+        if random_number > self.epsilon and self.q_table[best_move] != 0:
+            # print(f'Best move is: {best_move}')
             return best_move
-        
         random_move = random.choice(possible_positions)
+        # print(f'RANDOM move is: {random_move}')
         return random_move
 
     def __find_cardinal_directions__(self, position):
@@ -108,11 +116,18 @@ class q_learner:
         return applicable_cardinal_directions
     
     def argmax(self, position):
-        max = -9999
+        max = -9999999
+        # print(f'Next Position: {position}')
+        possible_maxes = []
         for position_direction in self.q_table:
             if position == position_direction[0]:
+                possible_maxes.append(str((position_direction, self.q_table[position_direction])))
                 if max < self.q_table[(position_direction)]:
                     max = self.q_table[(position_direction)]
+                    # print(f'Potential Max: {max} | Action from next position: {position_direction[1]}')
+        # print(f'Possible Maxes: {", ".join(possible_maxes)}' )
+        # print(f'Actual Max: {max}')
+        # print('-----' * 10)
         return max
     
     def get_next_state(self, move):
